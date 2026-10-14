@@ -6,7 +6,6 @@
     ChatSidebar,
     ModelCard,
     ModelPickerModal,
-    ChatModelSelector,
   } from "$lib/components";
   import {
     pickAutoModel,
@@ -3380,7 +3379,20 @@
       return;
     }
 
-    // Find the best auto model that fits in available memory
+    // PeopleConnect: no automatic model choice. A message with no model picked
+    // puts the text back and asks for a pick; nothing gets downloaded or
+    // launched that the user did not choose.
+    if (!chosenModelId) {
+      chatDraft = content;
+      chatDraftFiles = files ?? [];
+      addToast({
+        type: "error",
+        message:
+          "No model selected. Open Select Model and pick one; this cluster does not choose models automatically.",
+      });
+      return;
+    }
+
     const totalMem = availableMemoryGB();
     const modelInfos = models.map((m) => ({
       id: m.id,
@@ -3391,9 +3403,7 @@
       family: m.family ?? "",
       quantization: m.quantization ?? "",
     }));
-    const autoModel = chosenModelId
-      ? (modelInfos.find((m) => m.id === chosenModelId) ?? null)
-      : pickAutoModel(modelInfos, totalMem);
+    const autoModel = modelInfos.find((m) => m.id === chosenModelId) ?? null;
 
     if (!autoModel) {
       addToast({
@@ -7068,26 +7078,25 @@
               </div>
             </div>
           {:else}
-            <!-- No running instance, no messages: show model selector -->
+            <!-- No running instance, no messages. PeopleConnect: no recommendation
+                 cards and no automatic choice; the user picks a model. -->
             <div
               class="flex-1 overflow-y-auto flex items-center justify-center px-8 py-6"
             >
-              <ChatModelSelector
-                models={models.map((m) => ({
-                  id: m.id,
-                  name: m.name ?? "",
-                  base_model: m.base_model ?? "",
-                  storage_size_megabytes: m.storage_size_megabytes ?? 0,
-                  capabilities: m.capabilities ?? [],
-                  family: m.family ?? "",
-                  quantization: m.quantization ?? "",
-                }))}
-                clusterLabel={chatClusterLabel}
-                totalMemoryGB={availableMemoryGB()}
-                modelStatus={chatModelStatus}
-                onSelect={handleChatModelSelect}
-                onAddModel={handleChatAddModel}
-              />
+              <div class="text-center">
+                <p
+                  class="text-xs text-exo-light-gray uppercase tracking-[0.2em] mb-2"
+                >
+                  No model running
+                </p>
+                <button
+                  type="button"
+                  class="text-sm text-white font-mono tracking-wide underline underline-offset-4 hover:text-exo-yellow"
+                  onclick={openChatModelPicker}
+                >
+                  Select a model to start
+                </button>
+              </div>
             </div>
             <div
               class="flex-shrink-0 px-8 pb-6 pt-4 bg-gradient-to-t from-exo-black via-exo-black to-transparent"
@@ -7098,8 +7107,8 @@
                   bind:uploadedFiles={chatDraftFiles}
                   placeholder={bestRunningModelId
                     ? "Ask anything"
-                    : "Ask anything — we'll pick the best model automatically"}
-                  showModelSelector={!!bestRunningModelId}
+                    : "Select a model first"}
+                  showModelSelector={true}
                   modelDisplayOverride={bestRunningModelId ?? undefined}
                   modelTasks={modelTasks()}
                   modelCapabilities={modelCapabilities()}
