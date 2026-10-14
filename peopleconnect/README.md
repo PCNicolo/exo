@@ -27,8 +27,18 @@ knob the M1 fleet needs. Everything else is upstream as is.
    adds a wifi hop to every token. Default 0 (off), so upstream behaviour is unchanged until
    the variable is set. The master applies it, so it must be set on the controller; set it
    on every node so a fallback master behaves the same.
-3. **This folder** (`peopleconnect/`): run wrapper, env examples, launchd template, upstream
-   sync script. New files only, so they never conflict on rebase.
+3. **No automatic model choice in the dashboard** (`dashboard/src/routes/+page.svelte`).
+   Upstream's chat page picks a model for you when you type without selecting one
+   (a built-in tier list, biggest that fits) and downloads and launches it, and the empty
+   chat state shows "Best for coding / writing / agentic" cards that do the same on one
+   click. Both are gone: a message with no model selected is put back in the box with a
+   "select a model" notice, and the empty state is a plain "Select a model to start"
+   link to the model picker. Picking a model in the picker still downloads it on purpose,
+   with the usual confirmation above 1 GB. The API never auto-placed models (a chat
+   request for a model with no instance returns 404), so nothing changes for Open WebUI
+   or other clients. Rebuild the dashboard after pulling (`cd dashboard && npm run build`).
+4. **This folder** (`peopleconnect/`): run wrapper, env examples, launchd template, upstream
+   sync script, model seeding script. New files only, so they never conflict on rebase.
 
 Nothing in exo's protocol changed. Even so, every node must run the same commit of this
 fork, because exo's event and state types only match between identical versions.
@@ -85,6 +95,47 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/us.peopleconnect.exo.pli
 `local.env` is ignored by git. The namespace must match on every node; nodes with
 different namespaces never see each other.
 
+## Model downloads
+
+- **Hugging Face token.** exo reads `HF_TOKEN` from the environment (or the file written
+  by `hf auth login`) and sends it on every download. A free read token lifts the
+  anonymous rate limits and unlocks gated repos. Put it in `peopleconnect/local.env`
+  (ignored by git) on every node; the macOS app has the same field under Advanced.
+- **How exo downloads.** Each node fetches only the safetensors files that hold its own
+  layers (tensor parallel needs all files), 8 files at a time, one HTTPS stream per file
+  with resume. With 5 or 6 nodes that is still the same model pulled from the internet
+  several times, and a different layer split later means more pulls.
+- **Seed once, copy over the LAN.** `peopleconnect/seed-model.sh <model id> [user@node ...]`
+  downloads the full model on the machine you run it from (16 parallel connections, token
+  from the env or `local.env`) and rsyncs it into `~/.exo/models/` on each listed node.
+  exo lists anything already in that folder as downloaded. Seed the full model on every
+  worker that may hold a shard, so re-placements never download.
+- Models live in `~/.exo/models/<org>--<name>/` on macOS. `EXO_MODELS_DIRS` adds an
+  external SSD; `EXO_MODELS_READ_ONLY_DIRS` can point at a network share, at the cost of
+  loading weights over the network on every model start.
+
+## Models to test on the M1 pool
+
+Sizes are from exo's model cards (on-disk weights, before KV cache). Usable GPU memory
+after our setup script: about 26 GB per 32 GB node, 12 GB per 16 GB node, 5 GB per 8 GB
+node. Placement adds up the nodes' free RAM, so plan with a margin.
+
+| Model | On disk | Active params per token | Fits on | Why |
+|---|---|---|---|---|
+| Qwen3-Next-80B-A3B-Instruct-4bit | 43.8 GB | 3B | two 32 GB M1 Max | Best first multi-node test: big model, few active params so each M1 does little work per token, 262k context, good tool calling. |
+| gpt-oss-120b-MXFP4-Q8 | 65.8 GB | 5.1B | three 32 GB nodes (both M1 Max plus the M1 Pro if it is 32 GB) | Strongest agent and tool-calling option in the list; Apache 2.0. Upstream's own config examples use it. |
+| Qwen3.5-122B-A10B-4bit | 64.8 GB | 10B | same three nodes | Quality step up from the 80B; 10B active means roughly a third of the 80B's speed. Later. |
+| Qwen3.6-35B-A3B-4bit | 19.0 GB | 3B | one 32 GB node | Single-node comparison against Nemotron-3-Nano (15.6 GB, also 3B active). |
+| GLM-4.7-Flash-4bit | 18.0 GB | about 3B | one 32 GB node | Second single-node comparison; strong at coding. |
+
+Skip dense 70B models (Llama 3.3 70B 4-bit, 37.9 GB): every token touches all 70B
+parameters, which on M1 memory bandwidth means a few tokens per second. Skip anything
+above about 90 GB until the M1 Pro RAM and the third M1 Max are confirmed.
+
+With `EXO_MIN_NODE_MEMORY_GB=16` the three 8 GB M1s are not used automatically. To test
+"5 or 6 M1s" on one model, pick the nodes by hand in the dashboard; expect the 8 GB nodes
+to add a wifi hop each and hold only a few layers.
+
 ## Pulling upstream
 
 ```bash
@@ -132,4 +183,6 @@ runner types and needs their Cachix secret.
   Thunderbolt cable, Pipeline vs Tensor. Then set the default sharding and concurrency.
 - Decide whether the 8 GB M1s run a small model instance (for example Qwen3.5-2B or
   Llama 3.2 3B for drafts and embeddings) or are retired from the grid.
+- Seed Qwen3-Next-80B-A3B-Instruct-4bit on both M1 Max (and the M1 Pro once its RAM is
+  confirmed) before the first multi-node benchmark.
 - Bootstrap peers patch, only if multicast discovery fails on the office network.
