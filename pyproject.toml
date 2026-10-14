@@ -80,8 +80,11 @@ members = ["rust/exo_rs", "bench", "tools"]
 
 [tool.uv.sources]
 exo-rs = { workspace = true }
+# PeopleConnect: on macOS, install the MLX wheel from PyPI instead of building upstream main from
+# source. Upstream pins a git commit for fast-synch deadlock fixes that only matter on RDMA (JACCL)
+# clusters; our M1 fleet has no RDMA and runs the ring backend, and a source build needs the full
+# Xcode Metal toolchain on every node.
 mlx = [
-  { git = "https://github.com/ml-explore/mlx.git", rev = "0e3ff3643b1c3719f78814b98e0d222afbad867c", marker = "sys_platform == 'darwin'" },
   { url = "https://github.com/rltakashige/mlx-jaccl-fix-small-recv/releases/download/mlx_cuda/mlx-0.32.0-cp313-cp313-manylinux_2_35_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
   { url = "https://github.com/rltakashige/mlx-jaccl-fix-small-recv/releases/download/mlx_cuda/mlx-0.32.0-cp313-cp313-manylinux_2_35_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine != 'aarch64'" },
 ]
