@@ -19,7 +19,7 @@ from exo.routing.event_router import (
     EventRouterClosedResourceError,
 )
 from exo.shared.apply import apply
-from exo.shared.constants import EXO_TRACING_ENABLED
+from exo.shared.constants import EXO_MIN_NODE_MEMORY_GB, EXO_TRACING_ENABLED
 from exo.shared.models.model_cards import ModelId
 from exo.shared.types.chunks import ErrorChunk, ImageChunk
 from exo.shared.types.commands import (
@@ -65,6 +65,7 @@ from exo.shared.types.events import (
     TracesMerged,
 )
 from exo.shared.types.instance_link import InstanceLink
+from exo.shared.types.memory import Memory
 from exo.shared.types.state import State
 from exo.shared.types.tasks import (
     ImageEdits as ImageEditsTask,
@@ -497,6 +498,7 @@ class Master:
                                 download_status=self.state.downloads,
                                 node_rdma_ctl=self.state.node_rdma_ctl,
                                 runners=self.state.runners,
+                                min_node_memory=Memory.from_gb(EXO_MIN_NODE_MEMORY_GB),
                             )
                             transition_events = get_transition_events(
                                 self.state.instances, placement, self.state.tasks

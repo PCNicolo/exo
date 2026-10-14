@@ -148,6 +148,27 @@ _NOT_PENDING = (
 )
 
 
+def filter_cycles_by_node_size(
+    cycles: Sequence[Cycle],
+    node_memory: Mapping[NodeId, MemoryUsage],
+    min_node_memory: Memory,
+    exempt: set[NodeId],
+) -> list[Cycle]:
+    """Drop cycles that include a node whose total RAM is below `min_node_memory`.
+
+    Exempt nodes (chosen by the caller) always pass. A node that has not reported its memory yet
+    passes too; the memory filter that runs next already handles that case with a clearer error.
+    """
+
+    def _big_enough(node_id: NodeId) -> bool:
+        if node_id in exempt:
+            return True
+        usage = node_memory.get(node_id)
+        return usage is None or usage.ram_total >= min_node_memory
+
+    return [cycle for cycle in cycles if all(_big_enough(n) for n in cycle)]
+
+
 def _shard_bytes(shard: ShardMetadata) -> int:
     """The memory a runner needs for its shard of the model."""
     storage = shard.model_card.storage_size.in_bytes
@@ -199,11 +220,15 @@ def place_instance(
     download_status: Mapping[NodeId, Sequence[DownloadProgress]] | None = None,
     node_rdma_ctl: Mapping[NodeId, NodeRdmaCtlStatus] | None = None,
     runners: Mapping[RunnerId, RunnerStatus] | None = None,
+    min_node_memory: Memory | None = None,
 ) -> dict[InstanceId, Instance]:
     """Place an instance of the command's model on the best group of nodes.
 
     Pass the cluster's `runners` so that memory taken by instances that haven't loaded yet is
     counted as used; without them every instance is assumed loaded.
+
+    `min_node_memory` leaves nodes with less total RAM out of the candidate groups, unless they
+    are in `required_nodes` (the caller picked them on purpose).
     """
     if runners is not None:
         node_memory = memory_once_loaded(node_memory, current_instances, runners)
@@ -226,6 +251,16 @@ def place_instance(
         ]
         if not candidate_cycles:
             raise ValueError("The chosen nodes aren't all connected to each other")
+    if min_node_memory is not None and min_node_memory > Memory():
+        candidate_cycles = filter_cycles_by_node_size(
+            candidate_cycles, node_memory, min_node_memory, required_nodes or set()
+        )
+        if not candidate_cycles:
+            raise ValueError(
+                "Every connected group includes a node with less than "
+                f"{min_node_memory.in_gb:.0f} GB of RAM (EXO_MIN_NODE_MEMORY_GB); "
+                "choose the nodes explicitly to use one anyway"
+            )
     cycles_with_sufficient_memory = filter_cycles_by_memory(
         candidate_cycles, node_memory, command.model_card.storage_size
     )

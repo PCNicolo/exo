@@ -112,3 +112,9 @@ ENABLE_DISAGGREGATION = os.getenv("ENABLE_DISAGGREGATION", "false").lower() == "
 EXO_MAX_CONCURRENT_REQUESTS = int(os.getenv("EXO_MAX_CONCURRENT_REQUESTS", "8"))
 
 EXO_MAX_INSTANCE_RETRIES = 5
+
+# PeopleConnect: automatic placement skips nodes with less total RAM than this many GB, unless the
+# request names them. 0 turns the filter off. Our 8 GB M1 MacBooks would otherwise be pulled into
+# a split model for a handful of layers and add a wifi hop to every token; they stay available for
+# small single-node models picked by hand in the dashboard.
+EXO_MIN_NODE_MEMORY_GB = float(os.getenv("EXO_MIN_NODE_MEMORY_GB", "0"))

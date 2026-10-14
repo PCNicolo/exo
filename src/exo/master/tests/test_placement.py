@@ -1421,3 +1421,86 @@ def test_which_runners_hold_memory_they_have_not_taken_yet() -> None:
         RunnerShuttingDown(),
     ):
         assert free_gb(status) == 10.0, status
+
+
+def _small_and_big_node(
+    small_total: int, big_total: int, free: int
+) -> tuple[Topology, NodeId, NodeId, dict[NodeId, MemoryUsage]]:
+    small, big = NodeId(), NodeId()
+    topology = Topology()
+    topology.add_node(small)
+    topology.add_node(big)
+    topology.add_connection(
+        Connection(source=small, sink=big, edge=create_socket_connection(1))
+    )
+    topology.add_connection(
+        Connection(source=big, sink=small, edge=create_socket_connection(2))
+    )
+    node_memory = {
+        small: MemoryUsage.from_bytes(
+            ram_total=small_total, ram_available=free, swap_total=0, swap_available=0
+        ),
+        big: MemoryUsage.from_bytes(
+            ram_total=big_total, ram_available=free, swap_total=0, swap_available=0
+        ),
+    }
+    return topology, small, big, node_memory
+
+
+def test_min_node_memory_skips_small_node(model_card: ModelCard):
+    # the model needs both nodes, but the small node is under the size floor
+    topology, small, big, node_memory = _small_and_big_node(
+        small_total=8_000, big_total=32_000, free=600
+    )
+    node_network = {small: create_node_network(), big: create_node_network()}
+    model_card = model_card.model_copy(update={"storage_size": Memory.from_bytes(1000)})
+
+    needs_two_nodes = place_instance_command(model_card).model_copy(
+        update={"min_nodes": 2}
+    )
+    with pytest.raises(ValueError, match="EXO_MIN_NODE_MEMORY_GB"):
+        place_instance(
+            needs_two_nodes,
+            topology,
+            {},
+            node_memory,
+            node_network,
+            _metal_only(node_memory),
+            min_node_memory=Memory.from_bytes(16_000),
+        )
+
+    # a model that fits the big node alone is placed there, not split
+    model_card = model_card.model_copy(update={"storage_size": Memory.from_bytes(500)})
+    placements = place_instance(
+        place_instance_command(model_card),
+        topology,
+        {},
+        node_memory,
+        node_network,
+        _metal_only(node_memory),
+        min_node_memory=Memory.from_bytes(16_000),
+    )
+    instance = next(iter(placements.values()))
+    assert set(instance.shard_assignments.node_to_runner) == {big}
+
+
+def test_min_node_memory_keeps_chosen_node(model_card: ModelCard):
+    # naming the small node in the request overrides the floor
+    topology, small, big, node_memory = _small_and_big_node(
+        small_total=8_000, big_total=32_000, free=600
+    )
+    node_network = {small: create_node_network(), big: create_node_network()}
+    model_card = model_card.model_copy(update={"storage_size": Memory.from_bytes(1000)})
+
+    placements = place_instance(
+        place_instance_command(model_card),
+        topology,
+        {},
+        node_memory,
+        node_network,
+        _metal_only(node_memory),
+        required_nodes={small, big},
+        min_node_memory=Memory.from_bytes(16_000),
+    )
+    instance = next(iter(placements.values()))
+    assert set(instance.shard_assignments.node_to_runner) == {small, big}
